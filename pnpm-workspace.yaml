@@ -3,10 +3,10 @@ packages:
   - "packages/*"
 
 allowBuilds:
-  - "@nestjs/core"
-  - "@prisma/client"
-  - "@prisma/engines"
-  - "@scarf/scarf"
-  - "bcrypt"
-  - "esbuild"
-  - "prisma"
+  "@nestjs/core": true
+  "@prisma/client": true
+  "@prisma/engines": true
+  "@scarf/scarf": true
+  "bcrypt": true
+  "esbuild": true
+  "prisma": true
