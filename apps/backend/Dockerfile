@@ -2,8 +2,7 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-# pnpm direto via npm — sem corepack
-RUN npm install -g pnpm@9.12.0
+RUN corepack disable && npm install -g pnpm@9.12.0
 
 # Manifests do monorepo (cache de layers)
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json tsconfig.base.json ./
@@ -28,7 +27,7 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-RUN npm install -g pnpm@9.12.0
+RUN corepack disable && npm install -g pnpm@9.12.0
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/shared/package.json ./packages/shared/
