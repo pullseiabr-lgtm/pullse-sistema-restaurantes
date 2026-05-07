@@ -21,6 +21,9 @@ logs/
 npm-debug.log*
 pnpm-debug.log*
 
+# Claude Code worktrees
+.claude/worktrees/
+
 # Editor
 .vscode/*
 !.vscode/extensions.json
