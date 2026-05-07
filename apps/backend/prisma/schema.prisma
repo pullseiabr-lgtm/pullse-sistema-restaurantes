@@ -1,0 +1,595 @@
+// =====================================================================
+// Schema Prisma — sistema de gestão de compras de restaurantes
+// Replicação do Foozi com adaptações para arquitetura própria
+// =====================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// =====================================================================
+// Enums
+// =====================================================================
+
+enum Role {
+  SUPERADMIN
+  ADMIN
+  MANAGER
+  BUYER
+  USER
+}
+
+enum UnitOfMeasure {
+  UNIT
+  KILOGRAM
+  GRAM
+  LITER
+  MILLILITER
+  BOX
+  ROLL
+  PACKAGE
+  METER
+  DOZEN
+  PAIR
+}
+
+enum DayOfWeek {
+  MON
+  TUE
+  WED
+  THU
+  FRI
+  SAT
+  SUN
+}
+
+enum RequisitionStatus {
+  DRAFT
+  OPEN
+  RECEIVING_QUOTES
+  IN_REVIEW
+  APPROVED
+  ORDERED
+  RECEIVED
+  CANCELLED
+  FINISHED
+}
+
+enum QuoteStatus {
+  PENDING
+  RECEIVED
+  WON
+  LOST
+  EXPIRED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  EXPORT
+  IMPORT
+}
+
+// =====================================================================
+// Identidade & Multi-tenancy
+// =====================================================================
+
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  stores              Store[]
+  memberships         TenantMembership[]
+  ownedSuppliers      Supplier[]              @relation("SupplierOwner")
+  supplierAccess      SupplierTenantAccess[]
+  ownedProducts       Product[]
+
+  @@map("tenants")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         Role     @default(USER)
+  isActive     Boolean  @default(true) @map("is_active")
+
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  memberships          TenantMembership[]
+  createdRequisitions  Requisition[] @relation("RequisitionCreatedBy")
+  buyerRequisitions    Requisition[] @relation("RequisitionBuyer")
+  apiKeys              ApiKey[]
+  auditLogs            AuditLog[]
+
+  @@index([email])
+  @@map("users")
+}
+
+// Vínculo de um User a um Tenant com um papel específico (multi-tenant + RBAC)
+model TenantMembership {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  tenantId   String   @map("tenant_id")
+  role       Role     @default(USER)
+  isActive   Boolean  @default(true) @map("is_active")
+  invitedAt  DateTime @default(now()) @map("invited_at")
+  acceptedAt DateTime? @map("accepted_at")
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  storeAccess StoreAccess[]
+
+  @@unique([userId, tenantId])
+  @@index([tenantId])
+  @@map("tenant_memberships")
+}
+
+// Filial / Loja (operação)
+model Store {
+  id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id")
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+
+  name      String   // ex: "AMORE COSTA DOURADA"
+  shortName String?  @map("short_name") // ex: "Garapu - PE"
+  cnpj      String?  @unique
+  isActive  Boolean  @default(true) @map("is_active")
+
+  address   StoreAddress?
+  accesses  StoreAccess[]
+  apiKeys   ApiKey[]
+  requisitions Requisition[]
+  shoppingLists ShoppingList[]
+  inventories Inventory[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  @@index([tenantId])
+  @@map("stores")
+}
+
+model StoreAddress {
+  id           String  @id @default(uuid())
+  storeId      String  @unique @map("store_id")
+  store        Store   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  street       String
+  number       String?
+  complement   String?
+  neighborhood String?
+  city         String
+  state        String  @db.Char(2)
+  zipCode      String  @map("zip_code")
+  country      String  @default("BR") @db.Char(2)
+
+  @@map("store_addresses")
+}
+
+// Acesso de membro a filial específica (granularidade fina)
+model StoreAccess {
+  id           String   @id @default(uuid())
+  membershipId String   @map("membership_id")
+  storeId      String   @map("store_id")
+
+  membership   TenantMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  store        Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([membershipId, storeId])
+  @@map("store_accesses")
+}
+
+// =====================================================================
+// API Keys & Webhooks
+// =====================================================================
+
+model ApiKey {
+  id          String    @id @default(uuid())
+  storeId     String    @map("store_id")
+  store       Store     @relation(fields: [storeId], references: [id])
+  name        String
+  // Apenas hash do token. O bruto é mostrado UMA vez ao criar.
+  tokenHash   String    @unique @map("token_hash")
+  // Prefixo visível para identificação (ex: "fzk_live_abc...")
+  tokenPrefix String    @map("token_prefix")
+
+  expiresAt   DateTime? @map("expires_at")
+  isActive    Boolean   @default(true) @map("is_active")
+  lastUsedAt  DateTime? @map("last_used_at")
+
+  createdById String    @map("created_by_id")
+  createdBy   User      @relation(fields: [createdById], references: [id])
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  revokedAt   DateTime? @map("revoked_at")
+
+  @@index([storeId])
+  @@map("api_keys")
+}
+
+model Webhook {
+  id          String   @id @default(uuid())
+  storeId     String   @map("store_id")
+  url         String
+  secret      String   // HMAC signing secret
+  events      String[] // ex: ["requisition.created", "quote.received"]
+  isActive    Boolean  @default(true) @map("is_active")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([storeId])
+  @@map("webhooks")
+}
+
+// =====================================================================
+// Catálogo (Categories, Products, Suppliers)
+// =====================================================================
+
+model Category {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  slug      String   @unique
+  parentId  String?  @map("parent_id")
+  parent    Category? @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children  Category[] @relation("CategoryHierarchy")
+
+  suppliers SupplierCategory[]
+  products  ProductCategory[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("categories")
+}
+
+model Supplier {
+  id              String           @id @default(cuid())
+  // Dono do registro: null = catálogo público; preenchido = fornecedor exclusivo do tenant
+  ownerTenantId   String?          @map("owner_tenant_id")
+  ownerTenant     Tenant?          @relation("SupplierOwner", fields: [ownerTenantId], references: [id])
+  isPublic        Boolean          @default(false) @map("is_public")
+
+  name            String
+  legalName       String           @map("legal_name")
+  cnpj            String?          @unique
+  imageUrl        String?          @map("image_url")
+  isActive        Boolean          @default(true) @map("is_active")
+
+  // Pagamento & logística
+  minimumOrderValue Decimal?       @map("minimum_order_value") @db.Decimal(12, 2)
+  paymentTerms      String?        @map("payment_terms")
+  deliveryLeadDays  Int?           @map("delivery_lead_days")
+  deliveryDays      DayOfWeek[]    @map("delivery_days")
+
+  categories      SupplierCategory[]
+  organizations   SupplierTenantAccess[]
+  agents          SupplierAgent[]
+  products        SupplierProduct[]
+  quotes          Quote[]
+
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  deletedAt       DateTime?        @map("deleted_at")
+
+  @@index([ownerTenantId])
+  @@index([cnpj])
+  @@map("suppliers")
+}
+
+model SupplierCategory {
+  supplierId String   @map("supplier_id")
+  categoryId String   @map("category_id")
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  @@id([supplierId, categoryId])
+  @@map("supplier_categories")
+}
+
+model SupplierTenantAccess {
+  supplierId String   @map("supplier_id")
+  tenantId   String   @map("tenant_id")
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@id([supplierId, tenantId])
+  @@map("supplier_tenant_access")
+}
+
+model SupplierAgent {
+  id         String   @id @default(uuid())
+  supplierId String   @map("supplier_id")
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  name       String
+  email      String?
+  phone      String?
+  whatsapp   String?
+  role       String?
+  isPrimary  Boolean  @default(false) @map("is_primary")
+  isActive   Boolean  @default(true) @map("is_active")
+
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([supplierId])
+  @@map("supplier_agents")
+}
+
+model Product {
+  id              String     @id @default(cuid())
+  name            String
+  description     String?    @db.Text
+  brand           String?
+  barcode         String?    @unique
+  unitOfMeasure   UnitOfMeasure @map("unit_of_measure")
+  imageUrl        String?    @map("image_url")
+  marketPrice     Decimal?   @map("market_price") @db.Decimal(12, 4)
+
+  isPublic        Boolean    @default(true) @map("is_public")
+  ownerTenantId   String?    @map("owner_tenant_id")
+  ownerTenant     Tenant?    @relation(fields: [ownerTenantId], references: [id])
+
+  categories      ProductCategory[]
+  suppliers       SupplierProduct[]
+  requisitionItems RequisitionItem[]
+  shoppingListItems ShoppingListItem[]
+  inventoryItems  InventoryItem[]
+
+  isActive        Boolean    @default(true) @map("is_active")
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+  deletedAt       DateTime?  @map("deleted_at")
+
+  @@index([brand])
+  @@index([ownerTenantId])
+  @@index([name])
+  @@map("products")
+}
+
+model ProductCategory {
+  productId  String   @map("product_id")
+  categoryId String   @map("category_id")
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  @@id([productId, categoryId])
+  @@map("product_categories")
+}
+
+model SupplierProduct {
+  id              String   @id @default(uuid())
+  supplierId      String   @map("supplier_id")
+  productId       String   @map("product_id")
+  supplier        Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  supplierSku     String?  @map("supplier_sku")
+  price           Decimal  @db.Decimal(12, 4)
+  minQuantity     Decimal? @map("min_quantity") @db.Decimal(12, 4)
+  packageQuantity Decimal? @map("package_quantity") @db.Decimal(12, 4)
+
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@unique([supplierId, productId])
+  @@map("supplier_products")
+}
+
+// =====================================================================
+// Requisições, Cotações e Listas de Compra
+// =====================================================================
+
+model Requisition {
+  id              String              @id @default(cuid())
+  storeId         String              @map("store_id")
+  store           Store               @relation(fields: [storeId], references: [id])
+
+  code            String              @unique
+  name            String?
+  status          RequisitionStatus   @default(DRAFT)
+
+  createdById     String              @map("created_by_id")
+  createdBy       User                @relation("RequisitionCreatedBy", fields: [createdById], references: [id])
+  buyerId         String?             @map("buyer_id")
+  buyer           User?               @relation("RequisitionBuyer", fields: [buyerId], references: [id])
+
+  shoppingListId  String?             @map("shopping_list_id")
+  shoppingList    ShoppingList?       @relation(fields: [shoppingListId], references: [id])
+
+  notes           String?             @db.Text
+  priority        Int                 @default(0)
+  dueDate         DateTime?           @map("due_date")
+
+  items           RequisitionItem[]
+  quotes          Quote[]
+
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+  submittedAt     DateTime?           @map("submitted_at")
+  cancelledAt     DateTime?           @map("cancelled_at")
+  finishedAt      DateTime?           @map("finished_at")
+  deletedAt       DateTime?           @map("deleted_at")
+
+  @@index([storeId])
+  @@index([status])
+  @@index([createdById])
+  @@map("requisitions")
+}
+
+model RequisitionItem {
+  id              String              @id @default(uuid())
+  requisitionId   String              @map("requisition_id")
+  requisition     Requisition         @relation(fields: [requisitionId], references: [id], onDelete: Cascade)
+
+  productId       String              @map("product_id")
+  product         Product             @relation(fields: [productId], references: [id])
+
+  quantity        Decimal             @db.Decimal(12, 4)
+  unitOfMeasure   UnitOfMeasure       @map("unit_of_measure")
+  notes           String?
+
+  quoteItems      QuoteItem[]
+
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+
+  @@index([requisitionId])
+  @@index([productId])
+  @@map("requisition_items")
+}
+
+model Quote {
+  id              String              @id @default(uuid())
+  requisitionId   String              @map("requisition_id")
+  requisition     Requisition         @relation(fields: [requisitionId], references: [id], onDelete: Cascade)
+  supplierId      String              @map("supplier_id")
+  supplier        Supplier            @relation(fields: [supplierId], references: [id])
+
+  status          QuoteStatus         @default(PENDING)
+  validUntil      DateTime?           @map("valid_until")
+  totalAmount     Decimal?            @map("total_amount") @db.Decimal(12, 2)
+  notes           String?
+
+  items           QuoteItem[]
+
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+  submittedAt     DateTime?           @map("submitted_at")
+
+  @@unique([requisitionId, supplierId])
+  @@map("quotes")
+}
+
+model QuoteItem {
+  id                String          @id @default(uuid())
+  quoteId           String          @map("quote_id")
+  quote             Quote           @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  requisitionItemId String          @map("requisition_item_id")
+  requisitionItem   RequisitionItem @relation(fields: [requisitionItemId], references: [id])
+
+  unitPrice         Decimal         @map("unit_price") @db.Decimal(12, 4)
+  availableQuantity Decimal?        @map("available_quantity") @db.Decimal(12, 4)
+  isSelected        Boolean         @default(false) @map("is_selected")
+  notes             String?
+
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+
+  @@index([quoteId])
+  @@map("quote_items")
+}
+
+model ShoppingList {
+  id           String              @id @default(cuid())
+  storeId      String              @map("store_id")
+  store        Store               @relation(fields: [storeId], references: [id])
+
+  name         String
+  description  String?
+  isAutomatic  Boolean             @default(false) @map("is_automatic")
+
+  items        ShoppingListItem[]
+  requisitions Requisition[]
+
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+  deletedAt    DateTime?           @map("deleted_at")
+
+  @@index([storeId])
+  @@map("shopping_lists")
+}
+
+model ShoppingListItem {
+  id              String        @id @default(uuid())
+  shoppingListId  String        @map("shopping_list_id")
+  shoppingList    ShoppingList  @relation(fields: [shoppingListId], references: [id], onDelete: Cascade)
+  productId       String        @map("product_id")
+  product         Product       @relation(fields: [productId], references: [id])
+  quantity        Decimal       @db.Decimal(12, 4)
+  unitOfMeasure   UnitOfMeasure @map("unit_of_measure")
+
+  @@map("shopping_list_items")
+}
+
+// =====================================================================
+// Estoque (placeholder — expandir conforme escaneamento de Estoque)
+// =====================================================================
+
+model Inventory {
+  id        String          @id @default(uuid())
+  storeId   String          @map("store_id")
+  store     Store           @relation(fields: [storeId], references: [id])
+  name      String          @default("Padrão")
+
+  items     InventoryItem[]
+
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+
+  @@unique([storeId, name])
+  @@map("inventories")
+}
+
+model InventoryItem {
+  id          String    @id @default(uuid())
+  inventoryId String    @map("inventory_id")
+  inventory   Inventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+  productId   String    @map("product_id")
+  product     Product   @relation(fields: [productId], references: [id])
+
+  quantity    Decimal   @db.Decimal(12, 4)
+  minQuantity Decimal?  @map("min_quantity") @db.Decimal(12, 4)
+  lastCountAt DateTime? @map("last_count_at")
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@unique([inventoryId, productId])
+  @@map("inventory_items")
+}
+
+// =====================================================================
+// Auditoria
+// =====================================================================
+
+model AuditLog {
+  id         String      @id @default(uuid())
+  userId     String?     @map("user_id")
+  user       User?       @relation(fields: [userId], references: [id])
+  action     AuditAction
+  entityType String      @map("entity_type")
+  entityId   String?     @map("entity_id")
+  diff       Json?       // before/after snapshot
+  ip         String?
+  userAgent  String?     @map("user_agent")
+
+  createdAt  DateTime    @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

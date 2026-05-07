@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+.turbo/
+
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.recommended.json
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Testing
+coverage/
+*.lcov
+
+# Prisma
+prisma/migrations/dev.db*
+
+# OS
+desktop.ini
+
+# Documentação sensível (playbook contém credenciais)
+playbook_sistema_fullstack.docx
+playbook_sistema_fullstack.md
+playbook_sistema_fullstack.txt
