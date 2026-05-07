@@ -4,10 +4,11 @@ WORKDIR /app
 
 RUN corepack disable && npm install -g pnpm@9.12.0
 
-# Manifests do monorepo (cache de layers)
+# Todos os package.json do workspace (pnpm exige todos para resolver o lockfile)
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json tsconfig.base.json ./
-COPY packages/shared/package.json ./packages/shared/
+COPY packages/shared/package.json                                                   ./packages/shared/
 COPY apps/backend/package.json apps/backend/nest-cli.json apps/backend/tsconfig.json ./apps/backend/
+COPY apps/frontend/package.json                                                     ./apps/frontend/
 
 RUN pnpm install --frozen-lockfile
 
@@ -30,8 +31,9 @@ WORKDIR /app
 RUN corepack disable && npm install -g pnpm@9.12.0
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-COPY packages/shared/package.json ./packages/shared/
-COPY apps/backend/package.json ./apps/backend/
+COPY packages/shared/package.json  ./packages/shared/
+COPY apps/backend/package.json     ./apps/backend/
+COPY apps/frontend/package.json    ./apps/frontend/
 
 RUN pnpm install --frozen-lockfile --prod
 

@@ -4,12 +4,13 @@ WORKDIR /app
 
 RUN corepack disable && npm install -g pnpm@9.12.0
 
-# Manifests (cache de layer)
+# Todos os package.json do workspace (pnpm exige todos para resolver o lockfile)
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json tsconfig.base.json ./
-COPY packages/shared/package.json                                         ./packages/shared/
-COPY apps/frontend/package.json apps/frontend/tsconfig.json               ./apps/frontend/
-COPY apps/frontend/vite.config.ts apps/frontend/index.html                ./apps/frontend/
-COPY apps/frontend/postcss.config.js apps/frontend/tailwind.config.js     ./apps/frontend/
+COPY packages/shared/package.json                                                   ./packages/shared/
+COPY apps/backend/package.json                                                      ./apps/backend/
+COPY apps/frontend/package.json apps/frontend/tsconfig.json                        ./apps/frontend/
+COPY apps/frontend/vite.config.ts apps/frontend/index.html                         ./apps/frontend/
+COPY apps/frontend/postcss.config.js apps/frontend/tailwind.config.js              ./apps/frontend/
 
 RUN pnpm install --frozen-lockfile
 
