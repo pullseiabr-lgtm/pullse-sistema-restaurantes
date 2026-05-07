@@ -1,23 +1,81 @@
 services:
+
+  # ─── Banco de dados ───────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     container_name: amore-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: amore_dev
-    ports:
-      - "5432:5432"
+      POSTGRES_USER:     ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB:       ${POSTGRES_DB:-amore}
     volumes:
-      - amore-postgres-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
 
-  redis:
-    image: redis:7-alpine
-    container_name: amore-redis
+  # ─── Backend NestJS ───────────────────────────────────────────────────────
+  backend:
+    image: ${BACKEND_IMAGE:-ghcr.io/pullseiabr-lgtm/pullse-sistema-restaurantes/backend:latest}
+    container_name: amore-backend
     restart: unless-stopped
-    ports:
-      - "6379:6379"
+    environment:
+      NODE_ENV:      production
+      PORT:          3001
+      # Sem PgBouncer em Docker — usa conexão direta pelo hostname do serviço
+      DATABASE_URL:  postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-amore}?connection_limit=10
+      DIRECT_URL:    postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-amore}
+      JWT_SECRET:       ${JWT_SECRET}
+      JWT_EXPIRES_IN:   ${JWT_EXPIRES_IN:-7d}
+      CORS_ORIGINS:     ${CORS_ORIGINS:-https://${DOMAIN}}
+      API_PREFIX:       api/v1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
 
+  # ─── Frontend React + Nginx (proxy → backend) ─────────────────────────────
+  frontend:
+    image: ${FRONTEND_IMAGE:-ghcr.io/pullseiabr-lgtm/pullse-sistema-restaurantes/frontend:latest}
+    container_name: amore-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - internal
+      - traefik   # rede externa gerenciada pelo Traefik do Hostinger
+    labels:
+      # ── Habilitar Traefik ──
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
+
+      # ── HTTPS (websecure) ──
+      - "traefik.http.routers.amore.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.amore.entrypoints=websecure"
+      - "traefik.http.routers.amore.tls=true"
+      - "traefik.http.routers.amore.tls.certresolver=letsencrypt"
+      - "traefik.http.services.amore.loadbalancer.server.port=80"
+
+      # ── HTTP → HTTPS redirect ──
+      - "traefik.http.routers.amore-http.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.amore-http.entrypoints=web"
+      - "traefik.http.routers.amore-http.middlewares=amore-https-redirect"
+      - "traefik.http.middlewares.amore-https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.amore-https-redirect.redirectscheme.permanent=true"
+
+# ─── Redes ────────────────────────────────────────────────────────────────
+networks:
+  internal:
+    driver: bridge
+  traefik:
+    external: true   # rede já criada pelo Hostinger; ajuste o nome se necessário
+
+# ─── Volumes ──────────────────────────────────────────────────────────────
 volumes:
-  amore-postgres-data:
+  postgres-data:
