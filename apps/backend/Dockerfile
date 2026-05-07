@@ -10,7 +10,7 @@ COPY packages/shared/package.json                                               
 COPY apps/backend/package.json apps/backend/nest-cli.json apps/backend/tsconfig.json ./apps/backend/
 COPY apps/frontend/package.json                                                     ./apps/frontend/
 
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --no-frozen-lockfile
 
 # Código-fonte
 COPY packages/shared/ ./packages/shared/
@@ -35,7 +35,7 @@ COPY packages/shared/package.json  ./packages/shared/
 COPY apps/backend/package.json     ./apps/backend/
 COPY apps/frontend/package.json    ./apps/frontend/
 
-RUN pnpm install --frozen-lockfile --prod
+RUN pnpm install --no-frozen-lockfile --prod
 
 # Artefatos do build
 COPY --from=builder /app/apps/backend/dist        ./apps/backend/dist

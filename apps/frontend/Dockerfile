@@ -12,7 +12,7 @@ COPY apps/frontend/package.json apps/frontend/tsconfig.json                     
 COPY apps/frontend/vite.config.ts apps/frontend/index.html                         ./apps/frontend/
 COPY apps/frontend/postcss.config.js apps/frontend/tailwind.config.js              ./apps/frontend/
 
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --no-frozen-lockfile
 
 COPY packages/shared/ ./packages/shared/
 COPY apps/frontend/src/ ./apps/frontend/src/
