@@ -3,23 +3,27 @@
   "version": "0.1.0",
   "private": true,
   "description": "Replicação do sistema Foozi (gestão de compras de restaurantes) — React + TypeScript + NestJS + Supabase",
-  "packageManager": "pnpm@11.0.8",
+  "packageManager": "npm@11.6.2",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "engines": {
     "node": ">=20",
-    "pnpm": ">=9"
+    "npm": ">=10"
   },
   "scripts": {
-    "build": "turbo run build",
+    "build": "npm --workspace @amore/frontend run build",
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "type-check": "turbo run type-check",
     "format": "prettier --write \"**/*.{ts,tsx,md,json,yml,yaml}\"",
-    "db:generate": "pnpm --filter @amore/backend prisma:generate",
-    "db:migrate": "pnpm --filter @amore/backend prisma:migrate",
-    "db:seed": "pnpm --filter @amore/backend prisma:seed",
-    "db:reset": "pnpm --filter @amore/backend prisma:reset",
-    "db:studio": "pnpm --filter @amore/backend prisma:studio"
+    "db:generate": "npm --workspace @amore/backend run prisma:generate",
+    "db:migrate": "npm --workspace @amore/backend run prisma:migrate",
+    "db:seed": "npm --workspace @amore/backend run prisma:seed",
+    "db:reset": "npm --workspace @amore/backend run prisma:reset",
+    "db:studio": "npm --workspace @amore/backend run prisma:studio"
   },
   "devDependencies": {
     "prettier": "^3.3.3",
